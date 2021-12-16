@@ -7,7 +7,7 @@
 namespace Programster\PgsqlLib;
 
 
-class Conjunction implements \Stringable
+class Conjunction
 {
     private string $m_conjunction;
 
@@ -18,19 +18,19 @@ class Conjunction implements \Stringable
     }
 
 
-    public static function createAnd()
+    public static function createAnd() : Conjunction
     {
         return new Conjunction("AND");
     }
 
 
-    public static function createOr()
+    public static function createOr() : Conjunction
     {
         return new Conjunction("OR");
     }
 
 
-    public function __toString()
+    public function __toString() : string
     {
         return $this->m_conjunction;
     }
