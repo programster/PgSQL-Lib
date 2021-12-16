@@ -14,7 +14,8 @@
         }
     ],
     "require": {
-        "php": ">=7.4.0"
+        "php": ">=7.4.0",
+        "ext-pgsql": "*"
     },
     "require-dev" : {
         "irap/autoloader" : "1.0.*",
