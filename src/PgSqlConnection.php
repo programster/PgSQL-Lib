@@ -4,7 +4,7 @@
  * A class to wrap around a postgresql connection, primarily because we
  * can't type-hint the postgresql resource like we can do with a \mysqli connection
  *
- * This should become rudundant as we move onto PHP 8.1 which will make the
+ * This should become redundant as we move onto PHP 8.1 which will make the
  * PgSql\Connection object a return type of pg_connect:
  * https://www.php.net/manual/en/class.pgsql-connection.php
  * https://www.php.net/manual/en/function.pg-connect.php
@@ -15,12 +15,22 @@ declare(strict_types = 1);
 namespace Programster\PgsqlLib;
 
 
+use PgSql\Result;
+use Programster\PgsqlLib\Exceptions\ExceptionNoData;
+use Programster\PgsqlLib\Exceptions\ExceptionQueryError;
+use Programster\PgsqlLib\Exceptions\ExceptionUnexpectedValueType;
+
+
 class PgSqlConnection
 {
-    private $m_resource; # the underlying pgsql connection resource.
+    private \PgSql\Connection $m_resource; # the underlying pgsql connection resource.
 
 
-    public function __construct($pgsqlResource)
+    /**
+     * Create a PostgreSql connection resource wrapper.
+     * @throws Exceptions\ExceptionConnectionError
+     */
+    public function __construct(\PgSql\Connection $pgsqlResource)
     {
         $status = pg_connection_status($pgsqlResource);
 
@@ -46,7 +56,7 @@ class PgSqlConnection
      * @param bool $useAsync - Whether to set PGSQL_CONNECT_ASYNC. If set then the connection is established
      * asynchronously. The state of the connection can then be checked via pg_connect_poll() or pg_connection_status().
      * @return PgSqlConnection - the connection to the PostgreSQL database
-     * @throws ConnectionError - if there was an issue connecting to the database.
+     * @throws Exceptions\ExceptionConnectionError - if there was an issue connecting to the database.
      */
     public static function create(
         string $host,
@@ -109,21 +119,31 @@ class PgSqlConnection
     /**
      * Executes a pg_query call on the underlying connection resource.
      * @param string $query - the query to execute.
+     * @param bool $throwExceptionOnError - whether to raise an exception if there was an issue executing the query.
+     * @return false|Result - the result of the query, or false if there was an issue and $throwExceptionOnError is set
+     * to false.
+     * @throws ExceptionQueryError - if $throwExceptionOnError is set to true, and there was an issue
      */
-    public function query(string $query)
+    public function query(string $query, bool $throwExceptionOnError = true) : false|Result
     {
-        $result = \Safe\pg_query($this->getResource(), $query);
+        $result = pg_query($this->getResource(), $query);
+
+        if ($result === false && $throwExceptionOnError)
+        {
+            throw new ExceptionQueryError(pg_last_error($this->getResource()), $query);
+        }
+
         return $result;
     }
 
 
-    public function escapeIdentifier(string $nameOfTableOrColumn)
+    public function escapeIdentifier(string $nameOfTableOrColumn) : string
     {
         return PgsqlLib::escapeidentifier($this->getResource(), $nameOfTableOrColumn);
     }
 
 
-    public function escapeIdentifiers(array $identifiers)
+    public function escapeIdentifiers(array $identifiers) : array
     {
         return PgsqlLib::escapeidentifiers($this->getResource(), $identifiers);
     }
@@ -135,7 +155,12 @@ class PgSqlConnection
     }
 
 
-    public function escapeValue($input)
+    /**
+     * Escape a value.
+     * @throws Exceptions\ExceptionUnexpectedValueType - if the input variable is a type the package
+     * does not recognize, and thus cannot handle.
+     */
+    public function escapeValue(mixed $input) : mixed
     {
         return PgsqlLib::escapeValue($this->getResource(), $input);
     }
@@ -147,6 +172,8 @@ class PgSqlConnection
      * @param array $rows - the rows of data to insert in name/value pairs. Every row must contain the same set of keys,
      * but those keys don't need to be in the same order.
      * @return string - the query to execute to batch insert the data.
+     * @throws ExceptionUnexpectedValueType - if there was an issue performing the escaping.
+     * @throws ExceptionNoData - if no data was provided for insertion.
      */
     public function generateBatchInsertQuery(string $tableName, array $rows) : string
     {
@@ -164,15 +191,15 @@ class PgSqlConnection
      * @param Conjunction $conjunction - 'AND' or 'OR' which changes whether the object needs all or
      *                                   any of the specified attributes in order to be loaded.
      * @return string - the raw sql string to send to the database.
-     * @throws \Exception - invalid $conjunction specified that was not 'OR' or 'AND'
+     * @throws ExceptionUnexpectedValueType
      */
-    public function generateSelectWhereQuery(string $tableName, array $wherePairs, Conjunction $conjunction)
+    public function generateSelectWhereQuery(string $tableName, array $wherePairs, Conjunction $conjunction) : string
     {
         return PgsqlLib::generateSelectWhereQuery($this->getResource(), $tableName, $wherePairs, $conjunction);
     }
 
 
     # Accessors
-    public function getResource() { return $this->m_resource; }
+    public function getResource() : \PgSql\Connection { return $this->m_resource; }
 }
 

@@ -7,9 +7,7 @@
 namespace Programster\PgsqlLib\Exceptions;
 
 
-use Exception;
-
-class ExceptionNoData extends Exception
+class ExceptionNoData extends \Exception
 {
 
 }

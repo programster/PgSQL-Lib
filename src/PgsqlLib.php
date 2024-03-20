@@ -9,21 +9,28 @@ declare(strict_types = 1);
 
 namespace Programster\PgsqlLib;
 
+use Programster\PgsqlLib\Exceptions\ExceptionNoData;
+use Programster\PgsqlLib\Exceptions\ExceptionUnexpectedValueType;
+
+
 class PgsqlLib
 {
     /**
-     * Generates the SET part of a mysql query with the provided name/value
-     * pairs provided
+     * Generates the SET part of a mysql query with the provided name/value pairs provided
+     *
      * @param $conn - the postgresql connection resource
      *
-     * @param array pairs - assoc array of name/value pairs to go in mysql
+     * @param array $pairs - assoc array of name/value pairs to go in mysql
      *
      * @param bool $escapeValues - (optional) set to false to disable escaping of values if you have already taken
      * care of this
      *
      * @param bool $escapeIdentifiers - (optional) set to false to disable escaping of identifiers if you have already
      * taken care of this.
+     *
      * @return string - the generated query string that can be appended.
+     *
+     * @throws ExceptionUnexpectedValueType
      */
     public static function generateQueryPairs(
         $conn,
@@ -67,10 +74,10 @@ class PgsqlLib
 
     /**
      * Escape the provided values, using the provided connection.
-     * @param
      * @param $conn - the PostgreSQL connection resource
      * @param array $inputs - the input values to escape.
      * @return array - the escaped values.
+     * @throws ExceptionUnexpectedValueType - if the inputs contain a type that is not recognized/supported
      */
     public static function escapeValues($conn, array $inputs) : array
     {
@@ -89,9 +96,9 @@ class PgsqlLib
      * Escape an identifier, such as the name of a table, or a column.
      * @param $conn - the PostgreSQL connection resource
      * @param string $nameOfTableOrColumn
-     * @return type
+     * @return string - the escaped identifier
      */
-    public static function escapeIdentifier($conn, string $nameOfTableOrColumn)
+    public static function escapeIdentifier($conn, string $nameOfTableOrColumn) : string
     {
         return pg_escape_identifier($conn, $nameOfTableOrColumn);
     }
@@ -119,11 +126,11 @@ class PgsqlLib
     /**
      * Escape a single value,
      * @param $conn - the PostgreSQL connection resource
-     * @param type $value
-     * @throws ExceptionUnexpectedValueType
-     * @return mixed - the escaped value.
+     * @param mixed $value
+     * @throws ExceptionUnexpectedValueType - if the type of the value passed in was not recognized
+     * so we were unable to handle escaping it.
      */
-    public static function escapeValue($conn, $value) : mixed
+    public static function escapeValue($conn, mixed $value) : mixed
     {
         if (is_string($value))
         {
@@ -139,7 +146,7 @@ class PgsqlLib
         }
         elseif ($value === null)
         {
-            // dont need to do anything for a null value
+            // Don't need to do anything for a null value
             $escapedValue = null;
         }
         else
@@ -149,7 +156,7 @@ class PgsqlLib
                 "issue if appropriate. In the meantime, try escaping values manually and set " .
                 "escapeValues to false.";
 
-            throw new Exceptions\ExceptionUnexpectedValueType($value, $msg);
+            throw new ExceptionUnexpectedValueType($value, $msg);
         }
 
         return $escapedValue;
@@ -163,6 +170,8 @@ class PgsqlLib
      *                            array list of values for WHERE IN().
      * @param Conjunction $conjunction - the conjunction to use in the where clause.
      * @return string - the where clause of a query such as "WHERE `id`='3'"
+     * @throws ExceptionUnexpectedValueType - if the wherePairs contain a type that is not recognized
+     * and thus cannot be escaped.
      */
     public static function generateWhereClause(
         $conn,
@@ -199,7 +208,7 @@ class PgsqlLib
 
         if (count($whereStrings) > 0)
         {
-            $whereClause = "WHERE " . implode(" {$conjunction} ", $whereStrings);
+            $whereClause = "WHERE " . implode(" {$conjunction->value} ", $whereStrings);
         }
 
         return $whereClause;
@@ -216,7 +225,7 @@ class PgsqlLib
      * @param Conjunction $conjunction - 'AND' or 'OR' which changes whether the object needs all or
      *                                   any of the specified attributes in order to be loaded.
      * @return string - the raw sql string to send to the database.
-     * @throws \Exception - invalid $conjunction specified that was not 'OR' or 'AND'
+     * @throws ExceptionUnexpectedValueType - if there was an issue performing escaping due to types.
      */
     public static function generateSelectWhereQuery(
         $conn,
@@ -226,8 +235,7 @@ class PgsqlLib
     ) : string
     {
         $escapedTableName = PgsqlLib::escapeIdentifier($conn, $tableName);
-        $query = "SELECT * FROM {$escapedTableName} " . PgsqlLib::generateWhereClause($conn, $wherePairs, $conjunction);
-        return $query;
+        return "SELECT * FROM {$escapedTableName} " . PgsqlLib::generateWhereClause($conn, $wherePairs, $conjunction);
     }
 
 
@@ -240,7 +248,7 @@ class PgsqlLib
      * @param Conjunction $conjunction - 'AND' or 'OR' which changes whether the object needs all or
      *                              any of the specified attributes in order to be loaded.
      * @return string - the raw sql string to send to the database.
-     * @throws \Exception - invalid $conjunction specified that was not 'OR' or 'AND'
+     * @throws Exception - invalid $conjunction specified that was not 'OR' or 'AND'
      */
     public static function generateDeleteWhereQuery(
         $conn,
@@ -250,12 +258,8 @@ class PgsqlLib
     ) : string
     {
         $escapedTableName = PgsqlLib::escapeIdentifier($conn, $tableName);
-
-        $query =
-            "DELETE FROM {$escapedTableName} " .
-            PgsqlLib::generateWhereClause($conn, $tableName, $wherePairs, $conjunction);
-
-        return $query;
+        $whereClause = PgsqlLib::generateWhereClause($conn, $wherePairs, $conjunction);
+        return "DELETE FROM {$escapedTableName} {$whereClause}";
     }
 
 
@@ -266,7 +270,8 @@ class PgsqlLib
      * @param array $rows - the rows of data to insert in name/value pairs. Every row must contain the same set of keys,
      * but those keys don't need to be in the same order.
      * @return string - the query to execute to batch insert the data.
-     * @throws \Exception
+     * @throws ExceptionNoData - if no data was passed in the $rows array, for inserting.
+     * @throws ExceptionUnexpectedValueType - if there was an issue performing escaping due to types.
      */
     public static function generateBatchInsertQuery($conn, string $tableName, array $rows) : string
     {
@@ -276,12 +281,12 @@ class PgsqlLib
 
         if (count($rows) === 0)
         {
-            throw new \Exception("No data to insert.");
+            throw new ExceptionNoData("No data to insert.");
         }
 
         foreach ($rows as $row)
         {
-            ksort($row); // always sort by key so all rows are consisten on insert.
+            ksort($row); // always sort by key so all rows are consistent on insert.
 
             if ($firstRow)
             {
@@ -306,7 +311,7 @@ class PgsqlLib
                 }
             }
 
-            $valueSets[] = "(" . \Safe\substr($rowValuesString, 0, strlen($rowValuesString) - 2) . ")";
+            $valueSets[] = "(" . substr($rowValuesString, 0, strlen($rowValuesString) - 2) . ")";
         }
 
         $escapedTableName = PgsqlLib::escapeIdentifier($conn, $tableName);
